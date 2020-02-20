@@ -1,0 +1,447 @@
+---
+title: "Social Media Analytics Project"
+author: "Kripa Fernandes, Carlos Montenegro Vela and Lucas Olivier"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r logo, echo=FALSE, out.width = '60%'}
+knitr::include_graphics("C:/Users/kfernandes/Desktop/Kripa Fernandes/Social Media Analytics/Group assignment/Citibank-Logo.png")
+```
+
+```{r library, include = FALSE, message = FALSE}
+
+for (i in c('scales', 'hms', 'jsonlite', 'utils', 'DBI', 'readbitmap','rtweet','rjson','dplyr','httr','reshape2','ggplot2','maps','tidyverse','stringr','mapproj','maps','viridis','rworldmap','igraph','networkD3', 'base64enc', 'dbplyr', 'lubridate', 'knitr')){
+  if (!require(i, character.only=TRUE)) install.packages(i, repos = "http://cran.us.r-project.org")
+  require(i, character.only=TRUE)
+}
+
+
+#Downloading tweets from API
+
+citibank_tweets <- readRDS("C:/Users/kfernandes/Desktop/Kripa Fernandes/Social Media Analytics/Group assignment/citibanksearch.rds")
+
+citibank_stock_price <- read.csv("C:/Users/kfernandes/Desktop/Kripa Fernandes/Social Media Analytics/Group assignment/citibankstockprice.csv")
+```
+The purpose of this project is to provide a comprehensive analysis of all the twitter buzz about the Citibank. The dataset contains tweets from December 2019 to January 2020. Our main sources of information are the following:
+
+ * Tweets on the profile of the username “@Citibank”
+ * Tweets that mention “Citibank”
+ * The list of memberships of the followers of the username “@Citibank”
+ 
+With the purpose of analyzing this data we have calculated/inferred the following:
+
+ * Citibank influencers
+ * Target audience for Citibank advertisements
+ * Tweet frequency (day and hour)
+ * Top retweeted tweets on Citibank
+ * Most liked tweets on Citibank
+ * Citibank vs [competitors](https://craft.co/citi/competitors) social media presence
+ * Geographical presence of Citibank tweeters
+ * Citibank's response rate on tweets
+ * Network analysis
+ 
+We have also included certain prototypes to be further developed:
+
+ * Common interests of Citibank followers
+ 
+The applications of the calculations include:
+
+
+ * ***Crisis Management:*** to avoid reputational damage
+ * ***Lead generation:*** to improve the marketing and advertising campaign
+ * ***Improve customer services:*** to help to manage the complaints
+ * ***Promotion:*** identifying Twitter users to promote Citibank
+ * ***Reputation effects:*** understanding impact of sentiment and public image on stock prices
+ * ***Geographical insights:*** Understanding relation between location of tweets and Citigroup location-wise revenues
+
+
+ 
+## Citibank influencers
+
+**The Golden Ratio** is the ratio of the number of followers to the number of friends of a particular user. It is often used in marketing to formulate promotional strategy.
+
+In our situation, we considered Citibank *influencers* to have a follower count greater than 30,000. The **top 10 influencers** are given in the table below:
+
+```{r influencers_code, include = FALSE, message = FALSE}
+citibank_tweets <- as.data.frame(citibank_tweets)
+
+#Importing user data
+user_citi <- users_data(citibank_tweets)
+
+#Finding mean followers and friends for users
+counts_citi <- user_citi %>%
+  group_by(screen_name) %>%
+  summarize(follower = mean(followers_count),
+      friend = mean(friends_count))
+
+# Calculate and store the golden ratio
+counts_citi$ratio <- counts_citi$follower/counts_citi$friend
+
+# Sort the data frame in decreasing order of follower count
+counts_citi_sort <- arrange(counts_citi, desc(follower))
+
+#List of users who can be used as Citibank influencers
+citi_influencers <- counts_citi_sort[counts_citi_sort$follower>30000,]
+citi_influencers <- as.data.frame(citi_influencers)
+```
+
+```{r influencers, echo = FALSE, message = FALSE}
+
+citi_influencers <- citi_influencers %>% rename(Twitter_handle = screen_name, Followers = follower, Following = friend, Golden_Ratio = ratio )
+
+kable(citi_influencers[1:10, ], digits = 4, caption = "Top 10 Citibank Influencers" )
+
+```
+
+
+## Target audience for Citibank advertisements
+
+The Golden Ratio was used in this scenario as well where a follower of Citibank with **less than 2000** followers is considered a potential customer of Citibank products. These tweeters had tweeted/retweeted about Citibank in the time period selected.
+
+```{r ads, echo = FALSE, message = FALSE}
+#List of users to position advertisments for targetted promotion
+citi_adverts <- counts_citi_sort[counts_citi_sort$follower<=2000,]
+
+citi_adverts <- citi_adverts %>% rename(Twitter_handle = screen_name, Followers = follower, Following = friend, Golden_Ratio = ratio )
+
+citi_adverts <- citi_adverts[citi_adverts$Following > 0, ]
+citi_adverts <- citi_adverts[citi_adverts$Golden_Ratio > 0, ]
+citi_adverts <- arrange(citi_adverts, Golden_Ratio)
+
+kable(citi_adverts[1:10, ], digits = 4, caption = "Top 10 Citibank Potential Customers" )
+```
+
+## Citibank tweet timelines
+
+An analysis of when people tweet about Citibank can improve Citibank's reach. For example, if a marketing team is aware on which days and hours a Twitter user is likely to come online and tweet about Citibank, it can help the company in understanding when they should post a tweet and ensure enough personnel are available at this time to respond to tweets.
+
+### Which days do people tweet about Citibank?
+
+```{r day, echo = FALSE, message = FALSE}
+# Plotting tweet count per day
+x <- ggplot(data = citibank_tweets, aes(x = wday(created_at, label = TRUE))) +
+  geom_bar(aes(fill = ..count..)) +
+  xlab("Days of the week") + ylab("Tweet frequency") + 
+  theme_minimal() +
+  scale_fill_gradient(low = "turquoise3", high = "darkgreen")
+x
+```
+
+### Which hours do people prefer to tweet about Citibank?
+
+```{r hours, echo = FALSE, message = FALSE}
+# Extract only time from the timestamp 
+citibank_tweets$time <- hms::hms(second(citibank_tweets$created_at), 
+                           minute(citibank_tweets$created_at), 
+                           hour(citibank_tweets$created_at))
+
+# Converting to `POSIXct` `
+citibank_tweets$time <- as.POSIXct(citibank_tweets$time)
+
+ggplot(data = citibank_tweets)+
+  geom_density(aes(x = time, y = ..scaled..),
+               fill="turquoise3", alpha=0.3) + 
+  xlab("Hours") + ylab("Tweet frequency") +
+  scale_x_datetime(breaks = date_breaks("4 hours"), 
+                   labels = date_format("%H:%M")) +
+  theme_minimal()
+```
+
+## Top retweeted tweet on Citibank
+
+The top tweet along with number of retweets where has been Citibank mentioned is given below:
+
+```{r retweets, echo = FALSE, message = FALSE}
+#Considering only the tweets that have been retweeted along with the count
+rtwt <- citibank_tweets[,c("status_id", "text", "retweet_count")]
+#head(rtwt)
+
+#Sorting tweets with the retweet count in descending order
+rtwt_sort <- arrange(rtwt, desc(retweet_count))
+
+#Removing duplicate tweets
+rtwt_unique <- unique(rtwt_sort, by = "text")
+
+rtwt_unique <- rtwt_unique %>% rename(Twitter_id = status_id, Tweet = text, Retweet_count = retweet_count )
+
+rtwt_arr <- rtwt_unique[, c(1, 3, 2)]
+
+kable(rtwt_arr[1, 2:3], digits = 4, align = "l", caption = "Top Citibank post retweeted" )
+```
+
+
+## Top liked tweets on Citibank
+
+```{r liked, echo = FALSE, message = FALSE}
+most_liked = citibank_tweets[order(-citibank_tweets$favorite_count),]
+
+most_liked <- most_liked %>% rename(Twitter_id = user_id, Status_id = status_id)
+
+kable(most_liked[1:10, 1:2], digits = 4, align = "l", caption = "Top Citibank 10 posts liked" )
+```
+
+
+## Top mediums of tweets
+
+Twitter users use many mediums to post tweets. The mediums Twitter users prefer can help develop a customer persona. From the following graph, we see the mediums Twitter users use to tweet:
+
+```{r mediums, echo = FALSE, message = FALSE}
+# Graph frequency of sources
+source_frequency = as.data.frame(table(citibank_tweets$source))
+source_frequency <- source_frequency[order(-source_frequency$Freq),]
+source_frequency <- source_frequency[1:5,]
+
+barplot(source_frequency$Freq,
+        main = "Top 5 tweet mediums",
+        ylab = "Tweet volume",
+        xlab = "Medium used",
+        names.arg = source_frequency$Var1 ,
+        col = "darkred",
+        horiz = FALSE,
+        cex.names=0.5)
+```
+
+Forbes, in 2014, had released an [article](https://www.forbes.com/sites/toddhixon/2014/04/10/what-kind-of-person-prefers-an-iphone/#287fe3efd1b0) which talked about characteristics of iPhone and Android users. With further analysis, customer demographics can be understood and personas can be built of those tweeting about Citibank.
+
+```{r mediump, echo=FALSE, fig.cap="Customer profile", out.width = '100%'}
+knitr::include_graphics("C:/Users/kfernandes/Desktop/Kripa Fernandes/Social Media Analytics/Group assignment/sample.jpg")
+```
+
+
+## Geographical presence of Citibank tweeters
+
+Citibank tweeters are located all over the globe. This is depicted in the location map shown. However, it must be noted that the location of all the tweets have not been captured as the users can block Twitter from accessing its location.
+
+```{r geoplot, echo = FALSE, message = FALSE}
+#Location plot
+citi_coord <- lat_lng(citibank_tweets)
+citi_geo <- na.omit(citi_coord[, c("lat", "lng")])
+cg <- as.data.frame(citi_geo)
+mp <- NULL
+mapWorld <- borders("world", colour="gray50", fill="gray50") # create a layer of borders
+mp <- ggplot() +   mapWorld
+mp <- mp + geom_point(aes(x=cg$lng, y=cg$lat) ,color="pink", size=3) 
+mp
+```
+
+## Citigroup geographical revenue
+
+The following graphs show the geographical revenue of Citigroup as a whole as data on only Citibank was unavailable. However, the second graph shows the composition of Citigroup's revenue and a sizeable chunk appears to come from Citibank.
+
+```{r grevenue, echo = FALSE, message = FALSE}
+continent = c("North America", "EMEA", "South America", "Asia", "Corporate / Other" )
+revenue = c(8458,2960,2725,3786,493)
+
+pie(revenue,labels = revenue, col=rainbow(length(continent)),
+    main="2019: Q3 Citigroup revenue ($ mn)")
+legend('topright',continent, cex = 0.6,
+       fill = rainbow(length(continent)))
+
+# Weight of citibank in citigroup results -> https://www.citigroup.com/citi/news/2019/third-quarter-2019-earnings.htm
+department = c("Citibank / Global Consumer Banking", "Private / Institutional Clients Group", "Corporation & others" )
+global_revenue = c(8648 , 9248 , 493)
+
+pie(global_revenue,labels = global_revenue, col=rainbow(length(department)),
+    main="Citigroup revenue per enterprise")
+legend('top',department, cex = 0.6,
+       fill = rainbow(length(department)))
+```
+
+## Citibank vs [competitors](https://craft.co/citi/competitors) social media presence
+
+The following graph will show the number of times Citibank and three of its competitors (the *competitors* has the link for the source) over the last week. The competitor companies are Bank of America, HSBC and BNP.
+
+```{r mentions, echo=FALSE, message = FALSE}
+# Extract tweets on #citibank and exclude retweets
+citi_twts <- search_tweets("#citibank", n = 18000, include_rts = FALSE)
+citi_ts <- ts_data(citi_twts, by = 'hours')
+names(citi_ts) <- c("Time", "Citibank")
+
+# Extract tweets on #hsbc and exclude retweets
+hsbc_twts <- search_tweets("#hsbc", n = 18000, include_rts = FALSE)
+hsbc_ts <- ts_data(hsbc_twts, by = 'hours')
+names(hsbc_ts) <- c("Time", "HSBC")
+
+# Extract tweets on #bankofamerica and exclude retweets
+boa_twts <- search_tweets("#bankofamerica", n = 18000, include_rts = FALSE)
+boa_ts <- ts_data(boa_twts, by = 'hours')
+names(boa_ts) <- c("Time", "Bank of America")
+
+# Extract tweets on #BNPParibas and exclude retweets
+bnp_twts <- search_tweets("#BNPParibas", n = 18000, include_rts = FALSE)
+bnp_ts <- ts_data(bnp_twts, by = 'hours')
+names(bnp_ts) <- c("Time", "BNP")
+
+
+# Merge the two time series objects and retain "time" column
+merged_df1 <- merge(citi_ts, hsbc_ts, by = "Time", all = TRUE)
+merged_df2 <- merge(merged_df1, boa_ts, by = "Time", all = TRUE)
+merged_df <- merge(merged_df2, bnp_ts, by = "Time", all = TRUE)
+
+# Stack the tweet frequency columns
+melt_df <- melt(merged_df, na.rm = TRUE, id.vars = "Time")
+```
+
+```{r mentions_c, echo = FALSE, message = FALSE}
+# Plot frequency of tweets on the banks
+ggplot(data = melt_df, aes(x = Time, y = value, col = variable))+
+  geom_line(lwd = 0.8)
+```
+
+## Citibank trend on the internet using "Google Trend"
+
+We have also included Citibank's presence in Google Trend to understand its correlation with stock prices.
+
+```{r gtrend, echo = FALSE, message = FALSE}
+citibank_google_trend = read.csv("C:/Users/kfernandes/Desktop/Kripa Fernandes/Social Media Analytics/Group assignment/citibank_google_trend.csv")
+
+barplot(citibank_google_trend$score, names.arg = citibank_google_trend$date,  main = "Google Trend about 'citibank'", ylab = "Score", xlab = 'from Dec to Jan 2020')
+```
+
+
+## Citigroup stock prices
+
+The stock prices are extracted for the period Dec 2019 to Jan 2020. Currently, the impact of Twitter sentiment does not have a sizeable impact but there might be a stronger correlation in the future for this.
+
+```{r stocks, echo = FALSE, message = FALSE}
+barplot(citibank_stock_price$Price,
+        main = "Citigroup stock price for Dec 2019 and Jan 2020",
+        ylab = "Price ($)",
+        xlab = "Date",
+        names.arg = citibank_stock_price$Date ,
+        col = "darkgreen",
+        horiz = FALSE,
+        cex.names=0.5,)
+```
+
+## Citibank's response rate on tweets
+
+```{r responses, include = FALSE, message = FALSE}
+
+replies <- citibank_tweets[citibank_tweets$reply_count > 0,]
+replies <- as.data.frame(replies)
+names(replies)
+
+
+citi_og_tweets <- citibank_tweets[citibank_tweets$reply_count == 0,]
+tweets_og <- unique(citi_og_tweets$screen_name)
+tweets_og <- as.data.frame(tweets_og)
+ct <- count(tweets_og)
+
+reply <- replies %>%
+            filter(str_detect(str_to_lower(screen_name), "citi"))
+reply <- as.data.frame(reply)
+reply_twt <- unique(reply$screen_name)
+reply_twt <- as.data.frame(reply_twt)
+rt <- count(reply_twt)
+
+response_rate <- (rt/ct)*100
+rrate <- round(response_rate, 20)
+rrate <- toString(rrate)
+```
+
+The dataset downloaded included responses on tweets mentioning Citibank. This was calculated by finding the number of Twitter handles containing "citi" after filtering the dataset for tweet responses. The response rate for Citibank is `r rrate`%*.
+
+## Network analysis
+
+In network analysis, we analyse a retweet network. A retweet network is the network of Twitter users who retweet posts by other users. In this scenario, we are analysing the retweet network for any tweet that has Citibank mentioned.
+
+The Twitter network can be represented in an *interactive graph*. The central nodes are the original tweeters and the nodes surrounding the central node are the retweeters:
+
+**(To see the different networks, it is recommended to refresh the page and click on the nodes.)**
+
+```{r outdegree, include = FALSE, message = FALSE}
+#Network analysis
+network <- citibank_tweets[, c("screen_name", "retweet_screen_name")]
+
+network1 <- network[complete.cases(network), ]
+
+#Convert network to matrix
+network_m <- as.matrix(network1)
+
+rtwt_network <- graph_from_edgelist(el = network_m, directed = TRUE)
+
+#Out degree scores for the network
+outd <- degree(rtwt_network, mode = c("out"))
+outds <- sort(outd, decreasing = TRUE)
+```
+
+```{r network, echo = FALSE, message = FALSE}
+#Plot network in interactive graph
+p <- simpleNetwork(network1, height="300px", width="300px")
+p
+```
+
+The first measure we are calculating is the **out-degree score** which is an indicator of the number of times a user retweets posts. Users with higher out-degree scores can be used to retweet promotional posts about Citibank. The users with the highest out-degree scores are:
+
+```{r outdegreetable, echo = FALSE, message = FALSE}
+#Top 10 users with highest out degree scores
+outds1 <- as.data.frame(outds)
+outds2 <- sqlRownamesToColumn(outds1)
+outds2 <- outds2 %>% rename(Twitter_handle = row_names, Out_degree_score = outds)
+
+kable(outds2[1:10, ], digits = 4, caption = "Top 10 users who retweet Citibank posts" )
+```
+
+The second measure we are calculating is the **in-degree score** which is an indicator of the number of times a user's posts are retweeted. Users with higher in-degree scores are considered influential as their posts are retweeted numerous times. The users with the highest in-degree scores are:
+
+```{r indegree, include = FALSE, message = FALSE}
+#In degree scores for the network
+ind <- degree(rtwt_network, mode = c("in"))
+inds <- sort(ind, decreasing = TRUE)
+```
+
+```{r indegreetable, echo = FALSE, message = FALSE}
+#Top 10 users with highest in degree scores
+
+inds1 <- as.data.frame(inds)
+inds2 <- sqlRownamesToColumn(inds1)
+inds2 <- inds2 %>% rename(Twitter_handle = row_names, In_degree_score = inds)
+
+kable(inds2[1:10, ], digits = 4, caption = "Top 10 users whose Citibank posts are retweeted" )
+
+```
+
+The third measure we are calculating in the betweenness score. Users with a high betweenness score have more control over a network because information passed by this user reaches a large population i.e. it is the degree to which the nodes of the network stand between each other.
+
+```{r btwndegree, include = FALSE, message = FALSE}
+btwn <- betweenness(rtwt_network, directed = TRUE)
+btwns <- btwn %>% 
+          sort(decreasing = TRUE) %>%
+          round()
+```
+
+```{r btwn, echo = FALSE, message = FALSE}
+#Top 10 users with highest in betweenness scores
+btwns1 <- as.data.frame(btwns)
+btwns2 <- sqlRownamesToColumn(btwns1)
+btwns2 <- btwns2 %>% rename(Twitter_handle = row_names, Betweenness_score = btwns)
+
+kable(btwns2[1:10, ], digits = 4, caption = "Top 10 Citibank retweeters with strong Twitter network" )
+```
+
+
+# Protoypes
+
+## Common interests of Citibank followers
+
+In this analysis, we found the user IDs of Twitter accounts that are followed by those who tweet about Citibank. The analysis is not complete because downloading the whole data is a challenge. From the user IDs, we can further obtain the screen names and find out the common interests of Citibank tweeters.
+
+```{r friends, include = FALSE, message = FALSE}
+library(utils)
+friends_id <- read.csv("C:\\Users\\kfernandes\\Desktop\\Kripa Fernandes\\Social Media Analytics\\Group assignment\\friends.csv")
+friends_id1 <- transform(friends_id, freq.loc = ave(seq(nrow(friends_id)), user_id, FUN=length))
+friends_id2 <- friends_id1[friends_id1$freq.loc > 1,]
+friends_id2 %>% arrange(desc(freq.loc))
+user_id_friends <- friends_id2[friends_id2$freq.loc > 2,]
+```
+
+```{r friends1, echo = FALSE, message = FALSE}
+#Dataframe of common users followed by sample of Citibank follower's
+user_id_friends <- as.data.frame(user_id_friends)
+user_id_friends <- user_id_friends %>% rename(Followed_id = user_id, Follower_count = freq.loc)
+
+kable(user_id_friends[, 3:4], digits = 100, row.names = FALSE, caption = "Twitter IDs followed by Citibank tweeters")
+```
